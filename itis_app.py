@@ -3,7 +3,7 @@ import numpy as np
 from datetime import date
 
 # -------------------------
-# Core model helpers
+# Core model parameters
 # -------------------------
 def sigmoid_curve(x, A, n, d):
     return A / (1 + np.exp(n * (x - d)))
@@ -82,7 +82,7 @@ def is_after_encounter(d, encounter_date):
     return d is not None and d > encounter_date
 
 # -------------------------
-# Medication configs (IV meds)
+# Medication IV
 # -------------------------
 MEDS_IV = {
     "Methylprednisolone": {
@@ -127,7 +127,7 @@ MEDS_IV = {
 }
 
 # -------------------------
-# Oral Cyclophosphamide config
+# Oral Cyclophosphamide 
 # -------------------------
 ORAL_CYC = {
     "dose1": 75.0, "dose2": 25000.0,
@@ -162,7 +162,7 @@ any_errors = False
 overall_components = []
 
 # =========================
-# IV meds (course logic)
+# IV meds 
 # =========================
 for med_name, cfg in MEDS_IV.items():
     st.subheader(med_name)
@@ -401,3 +401,4 @@ st.metric("Estimated Cumulative ITIS", f"{cumulative_itis:.4f}")
 
 if any_errors:
     st.warning("One or more inputs were invalid. Some medications/courses may have been excluded.")
+
