@@ -84,7 +84,7 @@ MEDS_IV = {
         "A1": 0.40, "A2": 0.80,
         "d1": 15.0, "d2": 21.0,
         "vanish1": 21.0, "vanish2": 30.0,
-        "units": "Dose units (your calibration)",
+        "units": "Dose units",
         "course_window_days": 30,
         "course_cap_dose": 3000.0,
         "course_min_dose": 250.0,
@@ -97,7 +97,7 @@ MEDS_IV = {
         "A1": 0.70, "A2": 0.85,
         "d1": 160.0, "d2": 200.0,
         "vanish1": 240.0, "vanish2": 300.0,
-        "units": "Dose units (your calibration)",
+        "units": "Dose units",
         "course_window_days": 60,
         "course_cap_dose": 2000.0,
         "course_min_dose": 500.0,
@@ -110,7 +110,7 @@ MEDS_IV = {
         "A1": 0.60, "A2": 0.90,
         "d1": 40.0, "d2": 80.0,
         "vanish1": 58.0, "vanish2": 110.0,
-        "units": "Dose units (your calibration)",
+        "units": "Dose units",
         "course_window_days": 180,
         "course_cap_dose": 8000.0,
         "course_min_dose": 150.0,
@@ -130,7 +130,7 @@ ORAL_CYC = {
     "vanish1": 90.0, "vanish2": 115.0,
     "course_min": 75.0,
     "course_max": 25000.0,
-    "daily_dose_units": "Daily dose units (your calibration)",
+    "daily_dose_units": "Daily dose units",
 }
 
 # -------------------------
@@ -356,3 +356,4 @@ st.metric("Estimated Cumulative ITIS", f"{cumulative_itis:.4f}")
 
 if any_errors:
     st.warning("One or more inputs were invalid. Some medications/courses may have been excluded.")
+
