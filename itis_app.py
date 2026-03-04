@@ -75,6 +75,12 @@ def warn_out_of_range(label, value, low, high):
     if value < low or value > high:
         st.warning(f"{label} = {value:.0f} is outside the specified range ({low:.0f}–{high:.0f}).")
 
+def is_future_date(d):
+    return d is not None and d > date.today()
+
+def is_after_encounter(d, encounter_date):
+    return d is not None and d > encounter_date
+
 # -------------------------
 # Medication configs (IV meds)
 # -------------------------
@@ -145,6 +151,11 @@ encounter_date = st.date_input(
     key="global_encounter_date",
 )
 
+# Encounter/current date must not be in the future
+if is_future_date(encounter_date):
+    st.error("Encounter / current date cannot be in the future. Please select today or an earlier date.")
+    st.stop()
+
 st.divider()
 
 any_errors = False
@@ -179,6 +190,8 @@ for med_name, cfg in MEDS_IV.items():
     )
 
     entries = []
+    invalid_date_found = False
+
     for i in range(int(n_doses)):
         c1, c2 = st.columns(2)
         with c1:
@@ -192,34 +205,46 @@ for med_name, cfg in MEDS_IV.items():
         with c2:
             iv_date = st.date_input(
                 f"IV date #{i+1} (DD/MM/YYYY)",
-                value=date.today(),
+                value=encounter_date,  # default to encounter date (prevents accidental future dates)
+                max_value=encounter_date,  # cannot be after encounter date
                 key=f"{med_name}_date_{i}",
             )
 
-        # ✅ Warning if single entered dose outside specified model range
-        warn_out_of_range(f"{med_name} Dose #{i+1}", dose, cfg["dose1"], cfg["dose2"])
+        # Hard validation: IV date must be <= encounter date AND not in future
+        # (max_value already enforces <= encounter_date, but keep robust checks)
+        if is_future_date(iv_date) or is_after_encounter(iv_date, encounter_date):
+            st.error(f"{med_name} IV date #{i+1} must be on or before the encounter/current date and cannot be a future date.")
+            any_errors = True
+            invalid_date_found = True
 
+        warn_out_of_range(f"{med_name} Dose #{i+1}", dose, cfg["dose1"], cfg["dose2"])
         entries.append((iv_date, float(dose)))
 
-    entries.sort(key=lambda x: x[0])
-
-    if entries and (encounter_date - entries[0][0]).days < 0:
-        st.error(f"Encounter/current date must be on or after the earliest {med_name} IV date.")
-        any_errors = True
+    # Reject entire medication if any IV date invalid
+    if invalid_date_found:
+        st.warning(f"{med_name} was excluded because one or more IV dates were invalid.")
         st.divider()
         continue
+
+    entries.sort(key=lambda x: x[0])
 
     courses = group_into_courses(entries, window_days=int(cfg["course_window_days"]))
 
     med_course_itises = []
     for course_start_date, course_sum_dose in courses:
-        # course total before cap (warn on this too)
+        # course start date must be <= encounter date
+        if is_after_encounter(course_start_date, encounter_date) or is_future_date(course_start_date):
+            st.error(
+                f"{med_name} course start date {course_start_date.strftime('%d/%m/%Y')} is invalid (after encounter/current date or future). "
+                "This medication is excluded."
+            )
+            any_errors = True
+            med_course_itises = []
+            break
+
         warn_out_of_range(f"{med_name} Course total (before cap)", course_sum_dose, cfg["dose1"], cfg["dose2"])
 
-        # cap dose (your current behaviour)
         course_dose_capped = min(course_sum_dose, float(cfg["course_cap_dose"]))
-
-        # warn on capped value as well (optional but useful)
         warn_out_of_range(f"{med_name} Course dose used", course_dose_capped, cfg["dose1"], cfg["dose2"])
 
         if course_dose_capped < float(cfg["course_min_dose"]):
@@ -280,7 +305,8 @@ if oral_received == "Yes":
     with c1:
         oral_start = st.date_input(
             "Start date (DD/MM/YYYY)",
-            value=date.today(),
+            value=encounter_date,
+            max_value=encounter_date,  # cannot be after encounter date
             key="oral_cyc_start",
         )
 
@@ -302,7 +328,8 @@ if oral_received == "Yes":
         else:
             oral_stop = st.date_input(
                 "Stop date (DD/MM/YYYY)",
-                value=date.today(),
+                value=encounter_date,
+                max_value=encounter_date,  # cannot be after encounter date
                 key="oral_cyc_stop",
             )
 
@@ -314,39 +341,57 @@ if oral_received == "Yes":
         key="oral_cyc_daily_dose",
     )
 
-    if oral_stop < oral_start:
-        st.error("Stop date must be on or after start date. Oral cyclophosphamide is excluded.")
+    # Hard date validation: reject entire oral CYC if dates invalid
+    oral_invalid = False
+    if is_future_date(oral_start) or is_after_encounter(oral_start, encounter_date):
+        st.error("Start date must be on or before the encounter/current date and cannot be a future date. Oral cyclophosphamide is excluded.")
         any_errors = True
-    elif encounter_date < oral_start:
-        st.error("Encounter/current date must be on or after the start date. Oral cyclophosphamide is excluded.")
+        oral_invalid = True
+
+    if is_future_date(oral_stop) or is_after_encounter(oral_stop, encounter_date):
+        st.error("Stop date must be on or before the encounter/current date and cannot be a future date. Oral cyclophosphamide is excluded.")
         any_errors = True
-    else:
-        effective_stop = min(oral_stop, encounter_date)
-        days_on_drug = (effective_stop - oral_start).days  # exclusive
+        oral_invalid = True
 
-        course_total = float(days_on_drug) * float(daily_dose)
-
-        # ✅ Warning if course_total outside specified range BEFORE cap
-        warn_out_of_range("Oral cyclophosphamide course_total (before cap)", course_total, ORAL_CYC["dose1"], ORAL_CYC["dose2"])
-
-        if course_total < ORAL_CYC["course_min"]:
-            st.error(
-                f"Oral cyclophosphamide course total is {course_total:.0f}, which is <{ORAL_CYC['course_min']:.0f}. "
-                "This course is excluded."
-            )
+    if not oral_invalid:
+        if oral_stop < oral_start:
+            st.error("Stop date must be on or after start date. Oral cyclophosphamide is excluded.")
             any_errors = True
         else:
-            if course_total > ORAL_CYC["course_max"]:
-                course_total = ORAL_CYC["course_max"]
+            effective_stop = min(oral_stop, encounter_date)
+            days_on_drug = (effective_stop - oral_start).days  # exclusive
 
-            # ✅ Warning if capped value is still outside range (unlikely, but consistent)
-            warn_out_of_range("Oral cyclophosphamide course_total used", course_total, ORAL_CYC["dose1"], ORAL_CYC["dose2"])
+            course_total = float(days_on_drug) * float(daily_dose)
 
-            interval_since_stop = (encounter_date - oral_stop).days
-            if interval_since_stop < 0:
-                interval_since_stop = 0
+            warn_out_of_range(
+                "Oral cyclophosphamide course_total (before cap)",
+                course_total,
+                ORAL_CYC["dose1"],
+                ORAL_CYC["dose2"],
+            )
 
-            overall_components.append(compute_itis(interval_since_stop, course_total, ORAL_CYC))
+            if course_total < ORAL_CYC["course_min"]:
+                st.error(
+                    f"Oral cyclophosphamide course total is {course_total:.0f}, which is <{ORAL_CYC['course_min']:.0f}. "
+                    "This course is excluded."
+                )
+                any_errors = True
+            else:
+                if course_total > ORAL_CYC["course_max"]:
+                    course_total = ORAL_CYC["course_max"]
+
+                warn_out_of_range(
+                    "Oral cyclophosphamide course_total used",
+                    course_total,
+                    ORAL_CYC["dose1"],
+                    ORAL_CYC["dose2"],
+                )
+
+                interval_since_stop = (encounter_date - oral_stop).days
+                if interval_since_stop < 0:
+                    interval_since_stop = 0
+
+                overall_components.append(compute_itis(interval_since_stop, course_total, ORAL_CYC))
 else:
     st.caption("Not included (not received).")
 
@@ -356,5 +401,3 @@ st.metric("Estimated Cumulative ITIS", f"{cumulative_itis:.4f}")
 
 if any_errors:
     st.warning("One or more inputs were invalid. Some medications/courses may have been excluded.")
-
-
