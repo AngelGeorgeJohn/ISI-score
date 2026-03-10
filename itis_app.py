@@ -204,6 +204,35 @@ MYCOPHENOLATE_MOFETIL = {
     "default_step": 125,
 }
 
+PREDNISOLONE = {
+    "dose_categories": [
+        "< 5 mg/day",
+        "5 - 10 mg/day",
+        "11 - 20 mg/day",
+        "> 20 mg/day",
+    ],
+    "A_map": {
+        "< 5 mg/day": 0.10,
+        "5 - 10 mg/day": 0.25,
+        "11 - 20 mg/day": 0.45,
+        "> 20 mg/day": 0.75,
+    },
+    "d_map": {
+        "< 5 mg/day": 5,
+        "5 - 10 mg/day": 6,
+        "11 - 20 mg/day": 7,
+        "> 20 mg/day": 7,
+    },
+    "vanish_map": {
+        "< 5 mg/day": 7,
+        "5 - 10 mg/day": 9,
+        "11 - 20 mg/day": 12,
+        "> 20 mg/day": 15,
+    },
+    "max_n_courses": 20,
+    "default_category": "5 - 10 mg/day",
+}
+
 # ============================================================
 # Reusable oral medication section
 # ============================================================
@@ -359,6 +388,140 @@ def render_decay_oral_medication_section(
             overall_components.append(combine_itis(med_course_itises))
         else:
             st.warning(f"No valid {med_name} courses were included.")
+    else:
+        st.caption("Not included (not received).")
+
+def render_prednisolone_section():
+    global any_errors, overall_components, encounter_date
+
+    st.subheader("Prednisolone")
+
+    prd_received = st.radio(
+        "Received Prednisolone?",
+        options=["No", "Yes"],
+        index=0,
+        horizontal=True,
+        key="prd_received",
+    )
+
+    if prd_received == "Yes":
+        st.info(
+            "If the medication has not been stopped yet, set the Stop date to the Encounter/Current date "
+            "to estimate the current approximate score."
+        )
+
+        n_prd_courses = st.number_input(
+            "How many prednisolone courses were given?",
+            min_value=1,
+            max_value=int(PREDNISOLONE["max_n_courses"]),
+            value=1,
+            step=1,
+            key="prd_n_courses",
+        )
+
+        prd_course_itises = []
+
+        for i in range(int(n_prd_courses)):
+            st.markdown(f"**Course #{i+1}**")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                prd_start = st.date_input(
+                    f"Start date #{i+1} (DD/MM/YYYY)",
+                    value=encounter_date,
+                    max_value=encounter_date,
+                    format="DD/MM/YYYY",
+                    key=f"prd_start_{i}",
+                )
+
+            prd_not_stopped = st.checkbox(
+                f"Course #{i+1} not stopped yet (use Encounter date as Stop date)",
+                value=False,
+                key=f"prd_not_stopped_{i}",
+            )
+
+            with c2:
+                if prd_not_stopped:
+                    prd_stop = encounter_date
+                    st.date_input(
+                        f"Stop date #{i+1} (DD/MM/YYYY)",
+                        value=prd_stop,
+                        disabled=True,
+                        format="DD/MM/YYYY",
+                        key=f"prd_stop_disabled_{i}",
+                    )
+                else:
+                    prd_stop = st.date_input(
+                        f"Stop date #{i+1} (DD/MM/YYYY)",
+                        value=encounter_date,
+                        max_value=encounter_date,
+                        format="DD/MM/YYYY",
+                        key=f"prd_stop_{i}",
+                    )
+
+            dose_cat = st.selectbox(
+                f"Dose category #{i+1}",
+                options=PREDNISOLONE["dose_categories"],
+                index=PREDNISOLONE["dose_categories"].index(PREDNISOLONE["default_category"]),
+                key=f"prd_dose_cat_{i}",
+            )
+
+            prd_invalid = False
+            if is_future_date(prd_start) or is_after_encounter(prd_start, encounter_date):
+                st.error(
+                    f"Course #{i+1}: Start date must be on or before the encounter/current date and cannot be a future date. "
+                    "This prednisolone course is excluded."
+                )
+                any_errors = True
+                prd_invalid = True
+
+            if is_future_date(prd_stop) or is_after_encounter(prd_stop, encounter_date):
+                st.error(
+                    f"Course #{i+1}: Stop date must be on or before the encounter/current date and cannot be a future date. "
+                    "This prednisolone course is excluded."
+                )
+                any_errors = True
+                prd_invalid = True
+
+            if prd_stop < prd_start:
+                st.error(
+                    f"Course #{i+1}: Stop date must be on or after start date. "
+                    "This prednisolone course is excluded."
+                )
+                any_errors = True
+                prd_invalid = True
+
+            if dose_cat not in PREDNISOLONE["A_map"]:
+                st.error(
+                    f"Course #{i+1}: Invalid dose category selected. This prednisolone course is excluded."
+                )
+                any_errors = True
+                prd_invalid = True
+
+            if not prd_invalid:
+                if encounter_date <= prd_stop:
+                    prd_itis = float(PREDNISOLONE["A_map"][dose_cat])
+                else:
+                    interval_since_stop = (encounter_date - prd_stop).days
+
+                    if interval_since_stop < 0:
+                        prd_itis = 0.0
+                    else:
+                        A = float(PREDNISOLONE["A_map"][dose_cat])
+                        d = float(PREDNISOLONE["d_map"][dose_cat])
+                        vanish = float(PREDNISOLONE["vanish_map"][dose_cat])
+                        n = calculate_n_from_vanish(d, vanish)
+                        prd_itis = float(np.clip(sigmoid_curve(interval_since_stop, A, n, d), 0.0, 1.0))
+
+                prd_course_itises.append(prd_itis)
+
+            if i < int(n_prd_courses) - 1:
+                st.divider()
+
+        if prd_course_itises:
+            overall_components.append(combine_itis(prd_course_itises))
+        else:
+            st.warning("No valid Prednisolone courses were included.")
     else:
         st.caption("Not included (not received).")
 
@@ -682,6 +845,13 @@ render_decay_oral_medication_section(
     not_stopped_prefix="mmf_not_stopped",
     dose_prefix="mmf_daily_dose",
 )
+
+st.divider()
+
+# ============================================================
+# Prednisolone
+# ============================================================
+render_prednisolone_section()
 
 # ============================================================
 # Final result
