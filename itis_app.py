@@ -10,6 +10,8 @@ st.set_page_config(page_title="ITIS Calculator", layout="centered")
 # ============================================================
 # Session state for simple multi-page flow
 # ============================================================
+if "show_intro_page" not in st.session_state:
+    st.session_state.show_intro_page = True
 if "show_result_page" not in st.session_state:
     st.session_state.show_result_page = False
 if "result_payload" not in st.session_state:
@@ -293,8 +295,8 @@ def render_decay_oral_medication_section(
             with c1:
                 st.date_input(
                     f"Start date #{i+1} (DD/MM/YYYY)",
-                    value=st.session_state["global_encounter_date"],
-                    max_value=st.session_state["global_encounter_date"],
+                    value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                    max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                     format="DD/MM/YYYY",
                     key=f"{start_prefix}_{i}",
                 )
@@ -309,7 +311,7 @@ def render_decay_oral_medication_section(
                 if st.session_state[f"{not_stopped_prefix}_{i}"]:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"],
+                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         disabled=True,
                         format="DD/MM/YYYY",
                         key=f"{stop_disabled_prefix}_{i}",
@@ -317,8 +319,8 @@ def render_decay_oral_medication_section(
                 else:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"],
-                        max_value=st.session_state["global_encounter_date"],
+                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                        max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         format="DD/MM/YYYY",
                         key=f"{stop_prefix}_{i}",
                     )
@@ -370,8 +372,8 @@ def render_prednisolone_section():
             with c1:
                 st.date_input(
                     f"Start date #{i+1} (DD/MM/YYYY)",
-                    value=st.session_state["global_encounter_date"],
-                    max_value=st.session_state["global_encounter_date"],
+                    value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                    max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                     format="DD/MM/YYYY",
                     key=f"prd_start_{i}",
                 )
@@ -386,7 +388,7 @@ def render_prednisolone_section():
                 if st.session_state[f"prd_not_stopped_{i}"]:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"],
+                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         disabled=True,
                         format="DD/MM/YYYY",
                         key=f"prd_stop_disabled_{i}",
@@ -394,8 +396,8 @@ def render_prednisolone_section():
                 else:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"],
-                        max_value=st.session_state["global_encounter_date"],
+                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                        max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         format="DD/MM/YYYY",
                         key=f"prd_stop_{i}",
                     )
@@ -449,7 +451,7 @@ def calculate_all_results():
                 invalid_found = True
 
             entries.append((iv_date, dose))
-            med_entered_doses.append(f"{date_display(iv_date)}: {dose}")
+            med_entered_doses.append(f"{date_display(iv_date)}: {dose} mg")
 
         if invalid_found:
             summary_lines.append(f"- {med_name}: excluded due to invalid input(s).")
@@ -471,10 +473,8 @@ def calculate_all_results():
                 any_errors = True
                 continue
 
-            # Use LAST dose date as IV reference date
             days_since = (encounter_date - course_last_date).days
 
-            # Replace negative interval with zero
             if days_since < 0:
                 days_since = 0
 
@@ -522,7 +522,7 @@ def calculate_all_results():
                 if course_total < ORAL_CYC["course_min"]:
                     any_errors = True
                     oral_summary.append(
-                        f"course #{i+1}: excluded (entered {daily_dose}/day, {date_display(oral_start)} to {date_display(oral_stop)})"
+                        f"course #{i+1}: excluded (entered {daily_dose} mg/day, {date_display(oral_start)} to {date_display(oral_stop)})"
                     )
                 else:
                     course_total_used = clip_course_total(course_total, ORAL_CYC["course_max"])
@@ -534,7 +534,7 @@ def calculate_all_results():
                         compute_itis(interval_since_stop, course_total_used, ORAL_CYC)
                     )
                     oral_summary.append(
-                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {daily_dose}/day"
+                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {daily_dose} mg/day"
                     )
             else:
                 oral_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -605,7 +605,7 @@ def calculate_all_results():
 
                 med_course_itises.append(med_itis)
                 med_summary.append(
-                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {med_daily_dose}/day"
+                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {med_daily_dose} mg/day"
                 )
             else:
                 med_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -703,9 +703,36 @@ def calculate_all_results():
     }
 
 # ============================================================
+# Introduction page
+# ============================================================
+if st.session_state.show_intro_page:
+    st.title("Immunosuppressive Therapy Intensity Score (ITIS)")
+
+    st.write(
+        "The immunosuppressive therapy intensity score (ITIS) is derived as part of the "
+        "[PARADISE](https://paradise-project.eu/) project."
+    )
+    st.write("This tool provides an approximate score of the degree of immunosuppression.")
+    st.write(
+        "Any values closer to one indicate suppressed immunity, whereas any score closer "
+        "to zero indicates normal immune function."
+    )
+    st.write(
+        "This tool can be used by clinicians, researchers, or patients. "
+        "The cumulative score derived might not be 100% accurate; however, it is an "
+        "approximate score of the current immune function status."
+    )
+
+    st.divider()
+
+    if st.button("Continue", type="primary"):
+        st.session_state.show_intro_page = False
+        st.rerun()
+
+# ============================================================
 # Result page
 # ============================================================
-if st.session_state.show_result_page and st.session_state.result_payload is not None:
+elif st.session_state.show_result_page and st.session_state.result_payload is not None:
     result = st.session_state.result_payload
 
     st.title("Estimated Cumulative ITIS Result")
@@ -723,9 +750,18 @@ if st.session_state.show_result_page and st.session_state.result_payload is not 
     if result["any_errors"]:
         st.warning("One or more inputs were invalid. Some medications/courses may have been excluded.")
 
-    if st.button("Back to entry form"):
-        st.session_state.show_result_page = False
-        st.rerun()
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("Back to entry form"):
+            st.session_state.show_result_page = False
+            st.rerun()
+
+    with c2:
+        if st.button("Back to introduction"):
+            st.session_state.show_result_page = False
+            st.session_state.show_intro_page = True
+            st.rerun()
 
 # ============================================================
 # Entry page
@@ -922,8 +958,16 @@ else:
 
     st.divider()
 
-    if st.button("Submit", type="primary"):
-        result_payload = calculate_all_results()
-        st.session_state.result_payload = result_payload
-        st.session_state.show_result_page = True
-        st.rerun()
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("Back to introduction"):
+            st.session_state.show_intro_page = True
+            st.rerun()
+
+    with c2:
+        if st.button("Submit", type="primary"):
+            result_payload = calculate_all_results()
+            st.session_state.result_payload = result_payload
+            st.session_state.show_result_page = True
+            st.rerun()
