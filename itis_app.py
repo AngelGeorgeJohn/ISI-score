@@ -110,6 +110,10 @@ def calculate_age_at_encounter(dob, encounter_date):
         return np.nan
     return float((encounter_date - dob).days / 365.25)
 
+def use_integer_input(cfg):
+    keys = ["daily_min", "daily_max", "default_dose", "default_step"]
+    return all(float(cfg[k]).is_integer() for k in keys)
+
 # ============================================================
 # Age-based dose adjustment helpers
 # ============================================================
@@ -224,21 +228,17 @@ def apply_cd19_adjustment_for_rituximab(days_since_iv, iv_date, cd19_value, cd19
 
     interval_test_from_iv = (cd19_test_date - iv_date).days
 
-    # Ignore case where test predates IV
     if interval_test_from_iv < 0:
         return days_since_iv, False
 
-    # CD19 > 10 and test within 300 days of IV -> ITIS = 0
     if cd19_value > 10 and interval_test_from_iv <= 300:
         return None, True
 
-    # CD19 = 0 -> reset days_since_iv
     if cd19_value == 0:
         if days_since_iv <= 30:
             return 0, False
         return 30, False
 
-    # 0 < CD19 < 10 -> standard algorithm
     return days_since_iv, False
 
 # ============================================================
@@ -368,6 +368,48 @@ MYCOPHENOLATE_MOFETIL = {
     "lymphocyte_adjustment_type": "relative",
 }
 
+METHOTREXATE = {
+    "dose1": 0.35,
+    "dose2": 5.0,
+    "A1": 0.10,
+    "A2": 0.55,
+    "d1": 8.0,
+    "d2": 10.0,
+    "vanish1": 10.0,
+    "vanish2": 14.0,
+    "min_score": 0.10,
+    "max_score": 0.55,
+    "daily_dose_units": "mg",
+    "daily_min": 0.35,
+    "daily_max": 5.0,
+    "max_n_courses": 20,
+    "default_dose": 0.35,
+    "default_step": 0.05,
+    "age_adjustment_type": "absolute",
+    "lymphocyte_adjustment_type": "none",
+}
+
+TACROLIMUS = {
+    "dose1": 1.0,
+    "dose2": 6.0,
+    "A1": 0.50,
+    "A2": 0.75,
+    "d1": 12.0,
+    "d2": 12.0,
+    "vanish1": 13.0,
+    "vanish2": 14.0,
+    "min_score": 0.50,
+    "max_score": 0.75,
+    "daily_dose_units": "mg",
+    "daily_min": 1.0,
+    "daily_max": 6.0,
+    "max_n_courses": 20,
+    "default_dose": 1.0,
+    "default_step": 0.5,
+    "age_adjustment_type": "none",
+    "lymphocyte_adjustment_type": "none",
+}
+
 PREDNISOLONE = {
     "dose_categories": [
         "< 5 mg/day",
@@ -431,7 +473,7 @@ def render_decay_oral_medication_section(
             f"How many {med_name.lower()} courses were given?",
             min_value=1,
             max_value=int(cfg["max_n_courses"]),
-            value=1,
+            value=int(st.session_state.get(n_courses_key, 1)),
             step=1,
             key=n_courses_key,
         )
@@ -443,7 +485,10 @@ def render_decay_oral_medication_section(
             with c1:
                 st.date_input(
                     f"Start date #{i+1} (DD/MM/YYYY)",
-                    value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                    value=st.session_state.get(
+                        f"{start_prefix}_{i}",
+                        st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today()
+                    ),
                     max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                     format="DD/MM/YYYY",
                     key=f"{start_prefix}_{i}",
@@ -451,7 +496,7 @@ def render_decay_oral_medication_section(
 
             st.checkbox(
                 f"Course #{i+1} not stopped yet (use Encounter date as Stop date)",
-                value=False,
+                value=bool(st.session_state.get(f"{not_stopped_prefix}_{i}", False)),
                 key=f"{not_stopped_prefix}_{i}",
             )
 
@@ -467,20 +512,33 @@ def render_decay_oral_medication_section(
                 else:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                        value=st.session_state.get(
+                            f"{stop_prefix}_{i}",
+                            st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today()
+                        ),
                         max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         format="DD/MM/YYYY",
                         key=f"{stop_prefix}_{i}",
                     )
 
-            st.number_input(
-                f"Daily dose #{i+1} ({cfg['daily_dose_units']})",
-                min_value=0,
-                value=int(cfg["default_dose"]),
-                step=int(cfg["default_step"]),
-                format="%d",
-                key=f"{dose_prefix}_{i}",
-            )
+            if use_integer_input(cfg):
+                st.number_input(
+                    f"Dose #{i+1} ({cfg['daily_dose_units']})",
+                    min_value=int(cfg["daily_min"]),
+                    value=int(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"])),
+                    step=int(cfg["default_step"]),
+                    format="%d",
+                    key=f"{dose_prefix}_{i}",
+                )
+            else:
+                st.number_input(
+                    f"Dose #{i+1} ({cfg['daily_dose_units']})",
+                    min_value=float(cfg["daily_min"]),
+                    value=float(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"])),
+                    step=float(cfg["default_step"]),
+                    format="%.2f",
+                    key=f"{dose_prefix}_{i}",
+                )
 
             if i < int(st.session_state[n_courses_key]) - 1:
                 st.divider()
@@ -508,7 +566,7 @@ def render_prednisolone_section():
             "How many prednisolone courses were given?",
             min_value=1,
             max_value=int(PREDNISOLONE["max_n_courses"]),
-            value=1,
+            value=int(st.session_state.get("prd_n_courses", 1)),
             step=1,
             key="prd_n_courses",
         )
@@ -520,7 +578,10 @@ def render_prednisolone_section():
             with c1:
                 st.date_input(
                     f"Start date #{i+1} (DD/MM/YYYY)",
-                    value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                    value=st.session_state.get(
+                        f"prd_start_{i}",
+                        st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today()
+                    ),
                     max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                     format="DD/MM/YYYY",
                     key=f"prd_start_{i}",
@@ -528,7 +589,7 @@ def render_prednisolone_section():
 
             st.checkbox(
                 f"Course #{i+1} not stopped yet (use Encounter date as Stop date)",
-                value=False,
+                value=bool(st.session_state.get(f"prd_not_stopped_{i}", False)),
                 key=f"prd_not_stopped_{i}",
             )
 
@@ -544,7 +605,10 @@ def render_prednisolone_section():
                 else:
                     st.date_input(
                         f"Stop date #{i+1} (DD/MM/YYYY)",
-                        value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
+                        value=st.session_state.get(
+                            f"prd_stop_{i}",
+                            st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today()
+                        ),
                         max_value=st.session_state["global_encounter_date"] if "global_encounter_date" in st.session_state else date.today(),
                         format="DD/MM/YYYY",
                         key=f"prd_stop_{i}",
@@ -553,7 +617,9 @@ def render_prednisolone_section():
             st.selectbox(
                 f"Dose category #{i+1}",
                 options=PREDNISOLONE["dose_categories"],
-                index=PREDNISOLONE["dose_categories"].index(PREDNISOLONE["default_category"]),
+                index=PREDNISOLONE["dose_categories"].index(
+                    st.session_state.get(f"prd_dose_cat_{i}", PREDNISOLONE["default_category"])
+                ),
                 key=f"prd_dose_cat_{i}",
             )
 
@@ -665,7 +731,6 @@ def calculate_all_results():
             if days_since < 0:
                 days_since = 0
 
-            # CD19 logic for Rituximab only
             if med_name == "Rituximab" and cd19_tested == "Yes":
                 days_since, force_itis_zero = apply_cd19_adjustment_for_rituximab(
                     days_since_iv=days_since,
@@ -697,7 +762,7 @@ def calculate_all_results():
             oral_start = st.session_state.get(f"oral_cyc_start_{i}", encounter_date)
             not_stopped = st.session_state.get(f"oral_cyc_not_stopped_{i}", False)
             oral_stop = encounter_date if not_stopped else st.session_state.get(f"oral_cyc_stop_{i}", encounter_date)
-            raw_daily_dose = int(st.session_state.get(f"oral_cyc_daily_dose_{i}", 75))
+            raw_daily_dose = float(st.session_state.get(f"oral_cyc_daily_dose_{i}", 75))
 
             oral_invalid = False
             if is_future_date(oral_start) or is_after_encounter(oral_start, encounter_date):
@@ -740,7 +805,7 @@ def calculate_all_results():
                 if course_total < ORAL_CYC["course_min"]:
                     any_errors = True
                     oral_summary.append(
-                        f"course #{i+1}: excluded (entered {raw_daily_dose} mg/day, {date_display(oral_start)} to {date_display(oral_stop)})"
+                        f"course #{i+1}: excluded (entered {raw_daily_dose:.2f} mg/day, {date_display(oral_start)} to {date_display(oral_stop)})"
                     )
                 else:
                     course_total_used = clip_course_total(course_total, ORAL_CYC["course_max"])
@@ -752,7 +817,7 @@ def calculate_all_results():
                         compute_itis(interval_since_stop, course_total_used, ORAL_CYC)
                     )
                     oral_summary.append(
-                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {raw_daily_dose} mg/day"
+                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {raw_daily_dose:.2f} mg/day"
                     )
             else:
                 oral_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -764,7 +829,7 @@ def calculate_all_results():
             summary_lines.append("- Cyclophosphamide (Oral): no valid course included.")
 
     # --------------------------------------------------------
-    # Azathioprine / MMF
+    # Generic decay oral medication calculator
     # --------------------------------------------------------
     def calculate_decay_oral_medication(
         med_name,
@@ -789,7 +854,7 @@ def calculate_all_results():
             med_start = st.session_state.get(f"{start_prefix}_{i}", encounter_date)
             med_not_stopped = st.session_state.get(f"{not_stopped_prefix}_{i}", False)
             med_stop = encounter_date if med_not_stopped else st.session_state.get(f"{stop_prefix}_{i}", encounter_date)
-            raw_daily_dose = int(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"]))
+            raw_dose = float(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"]))
 
             med_invalid = False
             if is_future_date(med_start) or is_after_encounter(med_start, encounter_date):
@@ -801,33 +866,33 @@ def calculate_all_results():
             if med_stop < med_start:
                 any_errors = True
                 med_invalid = True
-            if raw_daily_dose < cfg["daily_min"] or raw_daily_dose > cfg["daily_max"]:
+            if raw_dose < cfg["daily_min"] or raw_dose > cfg["daily_max"]:
                 any_errors = True
                 med_invalid = True
 
             if not med_invalid:
-                adjusted_daily_dose = float(raw_daily_dose)
+                adjusted_dose = float(raw_dose)
 
                 if cfg.get("age_adjustment_type") == "relative":
-                    adjusted_daily_dose = apply_relative_age_adjustment(adjusted_daily_dose, age_at_encounter)
+                    adjusted_dose = apply_relative_age_adjustment(adjusted_dose, age_at_encounter)
                 elif cfg.get("age_adjustment_type") == "absolute":
-                    adjusted_daily_dose = apply_absolute_age_adjustment(adjusted_daily_dose, age_at_encounter)
+                    adjusted_dose = apply_absolute_age_adjustment(adjusted_dose, age_at_encounter)
 
                 if apply_lymph:
                     if cfg.get("lymphocyte_adjustment_type") == "relative":
-                        adjusted_daily_dose = apply_relative_lymphocyte_adjustment(adjusted_daily_dose, lymphocyte_count)
+                        adjusted_dose = apply_relative_lymphocyte_adjustment(adjusted_dose, lymphocyte_count)
                     elif cfg.get("lymphocyte_adjustment_type") == "absolute":
-                        adjusted_daily_dose = apply_absolute_lymphocyte_adjustment(adjusted_daily_dose, lymphocyte_count)
+                        adjusted_dose = apply_absolute_lymphocyte_adjustment(adjusted_dose, lymphocyte_count)
 
-                adjusted_daily_dose = clip_to_interval(
-                    adjusted_daily_dose,
+                adjusted_dose = clip_to_interval(
+                    adjusted_dose,
                     cfg["daily_min"],
                     cfg["daily_max"]
                 )
 
                 if encounter_date <= med_stop:
                     med_itis = calculate_linear_score(
-                        adjusted_daily_dose,
+                        adjusted_dose,
                         cfg["dose1"],
                         cfg["dose2"],
                         cfg["min_score"],
@@ -837,12 +902,11 @@ def calculate_all_results():
                     interval_since_stop = (encounter_date - med_stop).days
                     if interval_since_stop < 0:
                         interval_since_stop = 0
-
-                    med_itis = compute_itis(interval_since_stop, adjusted_daily_dose, cfg)
+                    med_itis = compute_itis(interval_since_stop, adjusted_dose, cfg)
 
                 med_course_itises.append(med_itis)
                 med_summary.append(
-                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {raw_daily_dose} mg/day"
+                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {raw_dose:.2f} {cfg['daily_dose_units']}"
                 )
             else:
                 med_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -874,6 +938,35 @@ def calculate_all_results():
         not_stopped_prefix="mmf_not_stopped",
         dose_prefix="mmf_daily_dose",
     )
+
+    calculate_decay_oral_medication(
+        med_name="Methotrexate",
+        cfg=METHOTREXATE,
+        received_key="meth_received",
+        n_courses_key="meth_n_courses",
+        start_prefix="meth_start",
+        stop_prefix="meth_stop",
+        not_stopped_prefix="meth_not_stopped",
+        dose_prefix="meth_dose",
+    )
+
+    calculate_decay_oral_medication(
+        med_name="Tacrolimus",
+        cfg=TACROLIMUS,
+        received_key="tac_received",
+        n_courses_key="tac_n_courses",
+        start_prefix="tac_start",
+        stop_prefix="tac_stop",
+        not_stopped_prefix="tac_not_stopped",
+        dose_prefix="tac_dose",
+    )
+
+    # --------------------------------------------------------
+    # Avacopan
+    # --------------------------------------------------------
+    if st.session_state.get("avacopan_received", "No") == "Yes":
+        overall_components.append(0.50)
+        summary_lines.append("- Avacopan: fixed dose 60 mg, ITIS = 0.50")
 
     # --------------------------------------------------------
     # Prednisolone
@@ -1066,7 +1159,6 @@ else:
         format="DD/MM/YYYY",
     )
 
-    # Explicitly store latest values so summary/result always uses the chosen dates
     st.session_state["date_of_birth"] = dob_input
     st.session_state["global_encounter_date"] = encounter_input
 
@@ -1315,6 +1407,58 @@ else:
     st.divider()
 
     # --------------------------------------------------------
+    # Methotrexate
+    # --------------------------------------------------------
+    render_decay_oral_medication_section(
+        med_name="Methotrexate",
+        cfg=METHOTREXATE,
+        received_key="meth_received",
+        n_courses_key="meth_n_courses",
+        start_prefix="meth_start",
+        stop_prefix="meth_stop",
+        stop_disabled_prefix="meth_stop_disabled",
+        not_stopped_prefix="meth_not_stopped",
+        dose_prefix="meth_dose",
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # Tacrolimus
+    # --------------------------------------------------------
+    render_decay_oral_medication_section(
+        med_name="Tacrolimus",
+        cfg=TACROLIMUS,
+        received_key="tac_received",
+        n_courses_key="tac_n_courses",
+        start_prefix="tac_start",
+        stop_prefix="tac_stop",
+        stop_disabled_prefix="tac_stop_disabled",
+        not_stopped_prefix="tac_not_stopped",
+        dose_prefix="tac_dose",
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # Avacopan
+    # --------------------------------------------------------
+    st.subheader("Avacopan")
+    st.radio(
+        "Received Avacopan?",
+        options=["No", "Yes"],
+        index=0,
+        horizontal=True,
+        key="avacopan_received",
+    )
+    if st.session_state["avacopan_received"] == "Yes":
+        st.caption("Fixed dose 60 mg; fixed ITIS score 0.50.")
+    else:
+        st.caption("Not included (not received).")
+
+    st.divider()
+
+    # --------------------------------------------------------
     # Prednisolone
     # --------------------------------------------------------
     render_prednisolone_section()
@@ -1330,7 +1474,6 @@ else:
 
     with c2:
         if st.button("Submit", type="primary"):
-            # Make sure the latest chosen DOB and encounter date are saved
             st.session_state["date_of_birth"] = dob
             st.session_state["global_encounter_date"] = encounter_date
 
