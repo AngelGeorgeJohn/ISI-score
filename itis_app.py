@@ -24,7 +24,7 @@ def sigmoid_curve(x, A, n, d):
     return A / (1 + np.exp(n * (x - d)))
 
 def calculate_n_from_vanish(d, vanish_day):
-    if vanish_day <= d:
+    if vanish_day <= d: 
         return np.nan
     return np.log(99) / (vanish_day - d)
 
@@ -1048,17 +1048,17 @@ if st.session_state.show_intro_page:
     st.title("Immunosuppressive Therapy Intensity Score (ITIS)")
 
     st.write(
-        "The immunosuppressive therapy intensity score (ITIS) is derived as part of the "
+        "The Immunosuppressive Therapy Intensity Score (ITIS) is derived as part of the "
         "[PARADISE](https://paradise-project.eu/) project."
     )
-    st.write("This tool provides an approximate score of the degree of immunosuppression.")
+    st.write("This tool provides an estimation of the overall degree of immunosuppression at a given point in time, integrating recorded medication information into a single time-linked value between zero and one.")
     st.write(
-        "Any values closer to one indicate suppressed immunity, whereas any score closer "
-        "to zero indicates normal immune function."
+        "Values close to one indicate suppressed immunity, whereas scores close to zero indicate normal immune function. "
+        
     )
     st.write(
-        "This tool can be used by clinicians, researchers, or patients. "
-        "It represents a patient's overall treatment status at a specific time point."
+        "This tool can be used by clinicians, researchers or patients."
+    
     )
 
     st.subheader("Information required to calculate ITIS")
