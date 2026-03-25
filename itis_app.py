@@ -206,6 +206,42 @@ def apply_absolute_lymphocyte_adjustment(dose, lymph_value):
         return float(dose)
 
 # ============================================================
+# CD19 helper for Rituximab only
+# ============================================================
+def apply_cd19_adjustment_for_rituximab(days_since_iv, iv_date, cd19_value, cd19_test_date):
+    """
+    Rules for Rituximab only:
+    1. IF CD19 >0 and <10 -> apply algorithm (no change)
+    2. IF CD19 >10 and interval between date of test and IV <=300 days -> RTX ITIS = 0
+    3. IF CD19 = 0 and interval from IV <=30 days -> reset interval from IV to 0
+    4. IF CD19 = 0 and interval from IV >30 days -> reset interval from IV to 30
+    """
+    if cd19_value is None or np.isnan(cd19_value):
+        return days_since_iv, False
+
+    if iv_date is None or cd19_test_date is None:
+        return days_since_iv, False
+
+    interval_test_from_iv = (cd19_test_date - iv_date).days
+
+    # Ignore biologically inconsistent case where test predates IV
+    if interval_test_from_iv < 0:
+        return days_since_iv, False
+
+    # CD19 > 10 and test within 300 days of IV -> ITIS = 0
+    if cd19_value > 10 and interval_test_from_iv <= 300:
+        return None, True
+
+    # CD19 = 0 -> reset days_since_iv
+    if cd19_value == 0:
+        if days_since_iv <= 30:
+            return 0, False
+        return 30, False
+
+    # 0 < CD19 < 10 -> apply standard algorithm (no change)
+    return days_since_iv, False
+
+# ============================================================
 # Oral medication helpers
 # ============================================================
 def calculate_linear_score(dose, min_dose, max_dose, min_score, max_score):
@@ -549,6 +585,14 @@ def calculate_all_results():
         lymph_value=lymphocyte_count,
     )
 
+    cd19_tested = st.session_state.get("cd19_tested", "No")
+    cd19_test_date = st.session_state.get("cd19_test_date", None)
+    cd19_value = st.session_state.get("cd19_value", None)
+    try:
+        cd19_value = float(cd19_value) if cd19_value is not None else np.nan
+    except Exception:
+        cd19_value = np.nan
+
     any_errors = False
     overall_components = []
     summary_lines = []
@@ -620,6 +664,18 @@ def calculate_all_results():
             days_since = (encounter_date - course_last_date).days
             if days_since < 0:
                 days_since = 0
+
+            # CD19 logic for Rituximab only
+            if med_name == "Rituximab" and cd19_tested == "Yes":
+                days_since, force_itis_zero = apply_cd19_adjustment_for_rituximab(
+                    days_since_iv=days_since,
+                    iv_date=course_last_date,
+                    cd19_value=cd19_value,
+                    cd19_test_date=cd19_test_date,
+                )
+                if force_itis_zero:
+                    med_course_itises.append(0.0)
+                    continue
 
             med_course_itises.append(compute_itis(days_since, course_dose_used, cfg))
 
@@ -884,6 +940,9 @@ def calculate_all_results():
         "lymphocyte_test_date": lymph_test_date,
         "lymphocyte_count": lymphocyte_count,
         "lymphocyte_applied": apply_lymph,
+        "cd19_tested": cd19_tested,
+        "cd19_test_date": cd19_test_date,
+        "cd19_value": cd19_value,
         "cumulative_itis": cumulative_itis,
         "any_errors": any_errors,
         "summary_lines": summary_lines,
@@ -913,6 +972,7 @@ if st.session_state.show_intro_page:
     st.write("• Date of birth")
     st.write("• Encounter / current date")
     st.write("• Lymphocyte count (optional)")
+    st.write("• CD19 count (optional)")
     st.write("• Medication")
     st.write("• Date of IV (for IV medications)")
     st.write("• Start date and stop date(s) for oral medications")
@@ -947,6 +1007,13 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
             st.write(f"**Lymphocyte test date:** {date_display(result['lymphocyte_test_date'])}")
         if result.get("lymphocyte_count") is not None and not np.isnan(result["lymphocyte_count"]):
             st.write(f"**Lymphocyte count:** {result['lymphocyte_count']:.2f} ×10⁹/L")
+
+    st.write(f"**CD19 tested:** {result.get('cd19_tested', 'No')}")
+    if result.get("cd19_tested") == "Yes":
+        if result.get("cd19_test_date") is not None:
+            st.write(f"**CD19 test date:** {date_display(result['cd19_test_date'])}")
+        if result.get("cd19_value") is not None and not np.isnan(result["cd19_value"]):
+            st.write(f"**CD19 value:** {result['cd19_value']:.2f}")
 
     st.subheader("Summary of Entered Medications")
     if result["summary_lines"]:
@@ -986,6 +1053,7 @@ else:
     st.date_input(
         "Date of birth (DD/MM/YYYY)",
         value=date(1980, 1, 1),
+        min_value=date(1900, 1, 1),
         max_value=date.today(),
         format="DD/MM/YYYY",
         key="date_of_birth",
@@ -1042,6 +1110,37 @@ else:
                 step=0.1,
                 format="%.2f",
                 key="lymphocyte_count",
+            )
+
+    st.divider()
+
+    st.subheader("CD19 count")
+    st.radio(
+        "CD19 tested?",
+        options=["No", "Yes"],
+        index=0,
+        horizontal=True,
+        key="cd19_tested",
+    )
+
+    if st.session_state["cd19_tested"] == "Yes":
+        c1, c2 = st.columns(2)
+        with c1:
+            st.date_input(
+                "CD19 test date (DD/MM/YYYY)",
+                value=encounter_date,
+                max_value=encounter_date,
+                format="DD/MM/YYYY",
+                key="cd19_test_date",
+            )
+        with c2:
+            st.number_input(
+                "CD19 value",
+                min_value=0.0,
+                value=0.0,
+                step=0.1,
+                format="%.2f",
+                key="cd19_value",
             )
 
     st.divider()
