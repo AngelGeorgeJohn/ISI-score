@@ -102,8 +102,57 @@ def is_after_encounter(d, encounter_date):
 def dose_is_valid(dose, low, high):
     return (dose is not None) and (dose >= low) and (dose <= high)
 
+def clip_to_interval(value, low, high):
+    return float(min(max(float(value), float(low)), float(high)))
+
 def clip_course_total(course_total, upper):
     return min(float(course_total), float(upper))
+
+def calculate_age_at_encounter(dob, encounter_date):
+    if dob is None or encounter_date is None or dob > encounter_date:
+        return np.nan
+    return float((encounter_date - dob).days / 365.25)
+
+# ============================================================
+# Age-based dose adjustment helpers
+# ============================================================
+def apply_relative_age_adjustment(dose, age_years):
+    """
+    65-73: x1.5
+    74-82: x2.0
+    >82:   x2.5
+    """
+    if dose is None or np.isnan(dose):
+        return dose
+    if age_years is None or np.isnan(age_years):
+        return float(dose)
+
+    if 65 <= age_years <= 73:
+        return float(dose) * 1.5
+    elif 74 <= age_years <= 82:
+        return float(dose) * 2.0
+    elif age_years > 82:
+        return float(dose) * 2.5
+    return float(dose)
+
+def apply_absolute_age_adjustment(dose, age_years):
+    """
+    65-73: +50
+    74-82: +100
+    >82:   +150
+    """
+    if dose is None or np.isnan(dose):
+        return dose
+    if age_years is None or np.isnan(age_years):
+        return float(dose)
+
+    if 65 <= age_years <= 73:
+        return float(dose) + 50
+    elif 74 <= age_years <= 82:
+        return float(dose) + 100
+    elif age_years > 82:
+        return float(dose) + 150
+    return float(dose)
 
 # ============================================================
 # Oral medication helpers
@@ -140,6 +189,7 @@ MEDS_IV = {
         "max_n_doses": 20,
         "default_step": 50,
         "default_dose": 250,
+        "age_adjustment_type": "relative",
     },
     "Rituximab": {
         "dose1": 500, "dose2": 2000,
@@ -153,6 +203,7 @@ MEDS_IV = {
         "max_n_doses": 20,
         "default_step": 100,
         "default_dose": 500,
+        "age_adjustment_type": "relative",
     },
     "Cyclophosphamide (IV)": {
         "dose1": 150, "dose2": 8000,
@@ -166,6 +217,7 @@ MEDS_IV = {
         "max_n_doses": 30,
         "default_step": 50,
         "default_dose": 150,
+        "age_adjustment_type": "relative",
     },
 }
 
@@ -180,6 +232,7 @@ ORAL_CYC = {
     "daily_min": 0,
     "daily_max": 1000,
     "max_n_courses": 20,
+    "age_adjustment_type": "relative",
 }
 
 AZATHIOPRINE = {
@@ -199,6 +252,7 @@ AZATHIOPRINE = {
     "max_n_courses": 20,
     "default_dose": 25,
     "default_step": 25,
+    "age_adjustment_type": "absolute",
 }
 
 MYCOPHENOLATE_MOFETIL = {
@@ -218,6 +272,7 @@ MYCOPHENOLATE_MOFETIL = {
     "max_n_courses": 20,
     "default_dose": 125,
     "default_step": 125,
+    "age_adjustment_type": "relative",
 }
 
 PREDNISOLONE = {
@@ -419,6 +474,8 @@ def render_prednisolone_section():
 # ============================================================
 def calculate_all_results():
     encounter_date = st.session_state["global_encounter_date"]
+    dob = st.session_state.get("date_of_birth")
+    age_at_encounter = calculate_age_at_encounter(dob, encounter_date)
 
     any_errors = False
     overall_components = []
@@ -439,19 +496,26 @@ def calculate_all_results():
         med_entered_doses = []
 
         for i in range(n_doses):
-            dose = int(st.session_state.get(f"{med_name}_dose_{i}", cfg["default_dose"]))
+            raw_dose = int(st.session_state.get(f"{med_name}_dose_{i}", cfg["default_dose"]))
             iv_date = st.session_state.get(f"{med_name}_date_{i}", encounter_date)
 
             if is_future_date(iv_date) or is_after_encounter(iv_date, encounter_date):
                 any_errors = True
                 invalid_found = True
 
-            if not dose_is_valid(dose, cfg["dose1"], cfg["dose2"]):
+            if raw_dose < 0:
                 any_errors = True
                 invalid_found = True
 
-            entries.append((iv_date, dose))
-            med_entered_doses.append(f"{date_display(iv_date)}: {dose} mg")
+            if cfg.get("age_adjustment_type") == "relative":
+                adjusted_dose = apply_relative_age_adjustment(raw_dose, age_at_encounter)
+            else:
+                adjusted_dose = float(raw_dose)
+
+            adjusted_dose = clip_to_interval(adjusted_dose, cfg["dose1"], cfg["dose2"])
+
+            entries.append((iv_date, adjusted_dose))
+            med_entered_doses.append(f"{date_display(iv_date)}: {raw_dose} mg")
 
         if invalid_found:
             summary_lines.append(f"- {med_name}: excluded due to invalid input(s).")
@@ -498,7 +562,7 @@ def calculate_all_results():
             oral_start = st.session_state.get(f"oral_cyc_start_{i}", encounter_date)
             not_stopped = st.session_state.get(f"oral_cyc_not_stopped_{i}", False)
             oral_stop = encounter_date if not_stopped else st.session_state.get(f"oral_cyc_stop_{i}", encounter_date)
-            daily_dose = int(st.session_state.get(f"oral_cyc_daily_dose_{i}", 75))
+            raw_daily_dose = int(st.session_state.get(f"oral_cyc_daily_dose_{i}", 75))
 
             oral_invalid = False
             if is_future_date(oral_start) or is_after_encounter(oral_start, encounter_date):
@@ -510,19 +574,26 @@ def calculate_all_results():
             if oral_stop < oral_start:
                 any_errors = True
                 oral_invalid = True
-            if daily_dose < ORAL_CYC["daily_min"] or daily_dose > ORAL_CYC["daily_max"]:
+            if raw_daily_dose < ORAL_CYC["daily_min"] or raw_daily_dose > ORAL_CYC["daily_max"]:
                 any_errors = True
                 oral_invalid = True
 
             if not oral_invalid:
+                adjusted_daily_dose = apply_relative_age_adjustment(raw_daily_dose, age_at_encounter)
+                adjusted_daily_dose = clip_to_interval(
+                    adjusted_daily_dose,
+                    ORAL_CYC["daily_min"],
+                    ORAL_CYC["daily_max"]
+                )
+
                 effective_stop = min(oral_stop, encounter_date)
                 days_on_drug = (effective_stop - oral_start).days
-                course_total = float(days_on_drug) * float(daily_dose)
+                course_total = float(days_on_drug) * float(adjusted_daily_dose)
 
                 if course_total < ORAL_CYC["course_min"]:
                     any_errors = True
                     oral_summary.append(
-                        f"course #{i+1}: excluded (entered {daily_dose} mg/day, {date_display(oral_start)} to {date_display(oral_stop)})"
+                        f"course #{i+1}: excluded (entered {raw_daily_dose} mg/day, {date_display(oral_start)} to {date_display(oral_stop)})"
                     )
                 else:
                     course_total_used = clip_course_total(course_total, ORAL_CYC["course_max"])
@@ -534,7 +605,7 @@ def calculate_all_results():
                         compute_itis(interval_since_stop, course_total_used, ORAL_CYC)
                     )
                     oral_summary.append(
-                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {daily_dose} mg/day"
+                        f"course #{i+1}: {date_display(oral_start)} to {date_display(oral_stop)}, dose {raw_daily_dose} mg/day"
                     )
             else:
                 oral_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -558,7 +629,7 @@ def calculate_all_results():
         not_stopped_prefix,
         dose_prefix,
     ):
-        nonlocal any_errors, overall_components, summary_lines, encounter_date
+        nonlocal any_errors, overall_components, summary_lines, encounter_date, age_at_encounter
 
         if st.session_state.get(received_key, "No") != "Yes":
             return
@@ -571,7 +642,7 @@ def calculate_all_results():
             med_start = st.session_state.get(f"{start_prefix}_{i}", encounter_date)
             med_not_stopped = st.session_state.get(f"{not_stopped_prefix}_{i}", False)
             med_stop = encounter_date if med_not_stopped else st.session_state.get(f"{stop_prefix}_{i}", encounter_date)
-            med_daily_dose = int(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"]))
+            raw_daily_dose = int(st.session_state.get(f"{dose_prefix}_{i}", cfg["default_dose"]))
 
             med_invalid = False
             if is_future_date(med_start) or is_after_encounter(med_start, encounter_date):
@@ -583,14 +654,27 @@ def calculate_all_results():
             if med_stop < med_start:
                 any_errors = True
                 med_invalid = True
-            if med_daily_dose < cfg["daily_min"] or med_daily_dose > cfg["daily_max"]:
+            if raw_daily_dose < cfg["daily_min"] or raw_daily_dose > cfg["daily_max"]:
                 any_errors = True
                 med_invalid = True
 
             if not med_invalid:
+                if cfg.get("age_adjustment_type") == "relative":
+                    adjusted_daily_dose = apply_relative_age_adjustment(raw_daily_dose, age_at_encounter)
+                elif cfg.get("age_adjustment_type") == "absolute":
+                    adjusted_daily_dose = apply_absolute_age_adjustment(raw_daily_dose, age_at_encounter)
+                else:
+                    adjusted_daily_dose = float(raw_daily_dose)
+
+                adjusted_daily_dose = clip_to_interval(
+                    adjusted_daily_dose,
+                    cfg["daily_min"],
+                    cfg["daily_max"]
+                )
+
                 if encounter_date <= med_stop:
                     med_itis = calculate_linear_score(
-                        med_daily_dose,
+                        adjusted_daily_dose,
                         cfg["dose1"],
                         cfg["dose2"],
                         cfg["min_score"],
@@ -601,11 +685,11 @@ def calculate_all_results():
                     if interval_since_stop < 0:
                         interval_since_stop = 0
 
-                    med_itis = compute_itis(interval_since_stop, med_daily_dose, cfg)
+                    med_itis = compute_itis(interval_since_stop, adjusted_daily_dose, cfg)
 
                 med_course_itises.append(med_itis)
                 med_summary.append(
-                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {med_daily_dose} mg/day"
+                    f"course #{i+1}: {date_display(med_start)} to {date_display(med_stop)}, dose {raw_daily_dose} mg/day"
                 )
             else:
                 med_summary.append(f"course #{i+1}: excluded due to invalid input(s).")
@@ -697,6 +781,8 @@ def calculate_all_results():
 
     return {
         "encounter_date": encounter_date,
+        "date_of_birth": dob,
+        "age_at_encounter": age_at_encounter,
         "cumulative_itis": cumulative_itis,
         "any_errors": any_errors,
         "summary_lines": summary_lines,
@@ -723,6 +809,7 @@ if st.session_state.show_intro_page:
     )
 
     st.subheader("Information required to calculate ITIS")
+    st.write("• Date of birth")
     st.write("• Medication")
     st.write("• Date of IV (for IV medications)")
     st.write("• Start date and stop date(s) for oral medications")
@@ -744,6 +831,12 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
     st.caption(f"Encounter / Current Date: {date_display(result['encounter_date'])}")
 
     st.metric("Estimated Cumulative ITIS", f"≈ {result['cumulative_itis']:.2f}")
+
+    st.subheader("Summary")
+    if result.get("date_of_birth") is not None:
+        st.write(f"**Date of birth:** {date_display(result['date_of_birth'])}")
+    if result.get("age_at_encounter") is not None and not np.isnan(result["age_at_encounter"]):
+        st.write(f"**Age at encounter:** {result['age_at_encounter']:.1f} years")
 
     st.subheader("Summary of Entered Medications")
     if result["summary_lines"]:
@@ -773,8 +866,17 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
 # ============================================================
 else:
     st.title("Immunosuppressive Therapy Intensity Score (ITIS)")
-    st.subheader("Encounter / Current Date")
+
+    st.subheader("Patient details")
     st.caption("Please enter/select dates in DD/MM/YYYY format.")
+
+    st.date_input(
+        "Date of birth (DD/MM/YYYY)",
+        value=date(1980, 1, 1),
+        max_value=date.today(),
+        format="DD/MM/YYYY",
+        key="date_of_birth",
+    )
 
     st.date_input(
         "Date of encounter / current date (DD/MM/YYYY)",
@@ -783,10 +885,19 @@ else:
         key="global_encounter_date",
     )
 
+    dob = st.session_state["date_of_birth"]
     encounter_date = st.session_state["global_encounter_date"]
 
     if is_future_date(encounter_date):
         st.error("Encounter / current date cannot be in the future. Please select today or an earlier date.")
+        st.stop()
+
+    if is_future_date(dob):
+        st.error("Date of birth cannot be in the future.")
+        st.stop()
+
+    if dob > encounter_date:
+        st.error("Date of birth cannot be after the encounter / current date.")
         st.stop()
 
     st.divider()
