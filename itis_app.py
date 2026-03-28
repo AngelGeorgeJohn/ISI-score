@@ -24,7 +24,7 @@ def sigmoid_curve(x, A, n, d):
     return A / (1 + np.exp(n * (x - d)))
 
 def calculate_n_from_vanish(d, vanish_day):
-    if vanish_day <= d: 
+    if vanish_day <= d:
         return np.nan
     return np.log(99) / (vanish_day - d)
 
@@ -105,10 +105,16 @@ def clip_to_interval(value, low, high):
 def clip_course_total(course_total, upper):
     return min(float(course_total), float(upper))
 
-def calculate_age_at_encounter(dob, encounter_date):
-    if dob is None or encounter_date is None or dob > encounter_date:
+def sanitize_age_at_encounter(age_years):
+    if age_years is None:
         return np.nan
-    return float((encounter_date - dob).days / 365.25)
+    try:
+        age_years = float(age_years)
+    except Exception:
+        return np.nan
+    if age_years < 0:
+        return np.nan
+    return age_years
 
 def use_integer_input(cfg):
     keys = ["daily_min", "daily_max", "default_dose", "default_step"]
@@ -322,6 +328,8 @@ ORAL_CYC = {
     "daily_min": 0,
     "daily_max": 1000,
     "max_n_courses": 20,
+    "default_dose": 75,
+    "default_step": 25,
     "age_adjustment_type": "relative",
     "lymphocyte_adjustment_type": "relative",
 }
@@ -633,8 +641,7 @@ def render_prednisolone_section():
 # ============================================================
 def calculate_all_results():
     encounter_date = st.session_state["global_encounter_date"]
-    dob = st.session_state.get("date_of_birth")
-    age_at_encounter = calculate_age_at_encounter(dob, encounter_date)
+    age_at_encounter = sanitize_age_at_encounter(st.session_state.get("age_at_encounter"))
 
     lymph_tested = st.session_state.get("lymphocyte_tested", "No")
     lymph_test_date = st.session_state.get("lymphocyte_test_date", None)
@@ -1027,7 +1034,6 @@ def calculate_all_results():
 
     return {
         "encounter_date": encounter_date,
-        "date_of_birth": dob,
         "age_at_encounter": age_at_encounter,
         "lymphocyte_tested": lymph_tested,
         "lymphocyte_test_date": lymph_test_date,
@@ -1053,16 +1059,14 @@ if st.session_state.show_intro_page:
     )
     st.write("This tool provides an estimation of the overall degree of immunosuppression at a given point in time, integrating recorded medication information into a single time-linked value between zero and one.")
     st.write(
-        "Values close to one indicate suppressed immunity, whereas scores close to zero indicate normal immune function. "
-        
+        "Values close to one indicate suppressed immunity, whereas scores close to zero indicate normal immune function."
     )
     st.write(
         "This tool can be used by clinicians, researchers or patients."
-    
     )
 
     st.subheader("Information required to calculate ITIS")
-    st.write("• Date of birth")
+    st.write("• Age at encounter")
     st.write("• Encounter / current date")
     st.write("• Lymphocyte count (optional)")
     st.write("• CD19 count (optional)")
@@ -1089,8 +1093,6 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
     st.metric("Estimated Cumulative ITIS", f"= {result['cumulative_itis']:.2f}")
 
     st.subheader("Summary")
-    if result.get("date_of_birth") is not None:
-        st.write(f"**Date of birth:** {date_display(result['date_of_birth'])}")
     if result.get("age_at_encounter") is not None and not np.isnan(result["age_at_encounter"]):
         st.write(f"**Age at encounter:** {result['age_at_encounter']:.1f} years")
 
@@ -1143,12 +1145,13 @@ else:
     st.subheader("Patient details")
     st.caption("Please enter/select dates in DD/MM/YYYY format.")
 
-    dob_input = st.date_input(
-        "Date of birth (DD/MM/YYYY)",
-        value=st.session_state.get("date_of_birth", date(1980, 1, 1)),
-        min_value=date(1900, 1, 1),
-        max_value=date.today(),
-        format="DD/MM/YYYY",
+    age_input = st.number_input(
+        "Age at encounter (years)",
+        min_value=0.0,
+        max_value=130.0,
+        value=float(st.session_state.get("age_at_encounter", 45.0)),
+        step=1.0,
+        format="%.1f",
     )
 
     encounter_input = st.date_input(
@@ -1159,22 +1162,18 @@ else:
         format="DD/MM/YYYY",
     )
 
-    st.session_state["date_of_birth"] = dob_input
+    st.session_state["age_at_encounter"] = age_input
     st.session_state["global_encounter_date"] = encounter_input
 
-    dob = dob_input
+    age_at_encounter = sanitize_age_at_encounter(age_input)
     encounter_date = encounter_input
 
     if is_future_date(encounter_date):
         st.error("Encounter / current date cannot be in the future. Please select today or an earlier date.")
         st.stop()
 
-    if is_future_date(dob):
-        st.error("Date of birth cannot be in the future.")
-        st.stop()
-
-    if dob > encounter_date:
-        st.error("Date of birth cannot be after the encounter / current date.")
+    if np.isnan(age_at_encounter):
+        st.error("Age at encounter must be zero or greater.")
         st.stop()
 
     st.divider()
@@ -1474,7 +1473,7 @@ else:
 
     with c2:
         if st.button("Submit", type="primary"):
-            st.session_state["date_of_birth"] = dob
+            st.session_state["age_at_encounter"] = age_at_encounter
             st.session_state["global_encounter_date"] = encounter_date
 
             result_payload = calculate_all_results()
