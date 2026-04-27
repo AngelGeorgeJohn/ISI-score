@@ -5,7 +5,7 @@ from datetime import date
 # ============================================================
 # Page config
 # ============================================================
-st.set_page_config(page_title="ITIS Calculator", layout="centered")
+st.set_page_config(page_title="ISI score Calculator", layout="centered")
 
 # ============================================================
 # Session state for simple multi-page flow
@@ -1122,10 +1122,10 @@ def calculate_all_results():
 # Introduction page
 # ============================================================
 if st.session_state.show_intro_page:
-    st.title("Immunosuppressive Therapy Intensity Score (ITIS)")
+    st.title("Immunosuppressive Therapy Intensity (ISI) Score ")
 
     st.write(
-        "The Immunosuppressive Therapy Intensity Score (ITIS) is derived as part of the "
+        "The Immunosuppressive Therapy Intensity (ISI) Score is derived as part of the "
         "[PARADISE](https://paradise-project.eu/) project."
     )
     st.write("This tool provides an estimation of the overall degree of immunosuppression at a given point in time, integrating recorded medication information into a single time-linked value between zero and one.")
@@ -1136,7 +1136,7 @@ if st.session_state.show_intro_page:
         "This tool can be used by clinicians, researchers or patients."
     )
 
-    st.subheader("Information required to calculate ITIS")
+    st.subheader("Information required to calculate ISI score")
     st.write("• Age at encounter")
     st.write("• Encounter / current date")
     st.write("• Lymphocyte count (optional)")
@@ -1158,10 +1158,10 @@ if st.session_state.show_intro_page:
 elif st.session_state.show_result_page and st.session_state.result_payload is not None:
     result = st.session_state.result_payload
 
-    st.title("Estimated Cumulative ITIS Result")
+    st.title("Estimated Cumulative ISI score")
     st.caption(f"Encounter / Current Date: {date_display(result['encounter_date'])}")
 
-    st.metric("Estimated Cumulative ITIS", f"= {result['cumulative_itis']:.2f}")
+    st.metric("Estimated Cumulative ISI score", f"= {result['cumulative_itis']:.2f}")
 
     st.subheader("Summary")
     if result.get("age_at_encounter") is not None and not np.isnan(result["age_at_encounter"]):
@@ -1211,7 +1211,7 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
 # Entry page
 # ============================================================
 else:
-    st.title("Immunosuppressive Therapy Intensity Score (ITIS)")
+    st.title("Immunosuppressive Therapy Intensity (ISI)  Score")
 
     st.subheader("Patient details")
     st.caption("Please enter/select dates in DD/MM/YYYY format.")
