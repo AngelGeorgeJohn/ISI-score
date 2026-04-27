@@ -221,10 +221,11 @@ def apply_absolute_lymphocyte_adjustment(dose, lymph_value):
 def apply_cd19_adjustment_for_rituximab(days_since_iv, iv_date, cd19_value, cd19_test_date):
     """
     Rules for Rituximab only:
-    1. IF CD19 >0 and <10 -> apply algorithm (no change)
-    2. IF CD19 >10 and interval between date of test and IV <=300 days -> RTX ITIS = 0
-    3. IF CD19 = 0 and interval from IV <=30 days -> reset interval from IV to 0
-    4. IF CD19 = 0 and interval from IV >30 days -> reset interval from IV to 30
+    1. IF CD19 > 0 and <= 10 -> apply algorithm normally (no change)
+    2. IF CD19 > 10 and interval between date of test and IV <= 330 days -> RTX ITIS = 0
+    3. IF CD19 = 0 and time since RTX IV <= 30 days -> reset time since RTX IV to 0
+    4. IF CD19 = 0 and time since RTX IV > 30 days and < 300 days -> reset time since RTX IV to 30
+    5. IF CD19 = 0 and time since RTX IV >= 300 days -> apply algorithm normally (no change)
     """
     if cd19_value is None or np.isnan(cd19_value):
         return days_since_iv, False
@@ -237,13 +238,20 @@ def apply_cd19_adjustment_for_rituximab(days_since_iv, iv_date, cd19_value, cd19
     if interval_test_from_iv < 0:
         return days_since_iv, False
 
-    if cd19_value > 10 and interval_test_from_iv <= 300:
+    # CD19 recovery: force rituximab contribution to zero if CD19 is >10
+    # and the CD19 test was within 330 days of the RTX IV/course reference date.
+    if cd19_value > 10 and interval_test_from_iv <= 330:
         return None, True
 
+    # CD19 remains fully depleted.
+    # This only modifies the RTX time interval if the encounter is <300 days since RTX.
     if cd19_value == 0:
         if days_since_iv <= 30:
             return 0, False
-        return 30, False
+        elif days_since_iv < 300:
+            return 30, False
+        else:
+            return days_since_iv, False
 
     return days_since_iv, False
 
