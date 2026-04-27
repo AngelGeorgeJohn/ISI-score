@@ -23,15 +23,18 @@ if "result_payload" not in st.session_state:
 def sigmoid_curve(x, A, n, d):
     return A / (1 + np.exp(n * (x - d)))
 
+
 def calculate_n_from_vanish(d, vanish_day):
     if vanish_day <= d:
         return np.nan
     return np.log(99) / (vanish_day - d)
 
+
 def make_linear(a1, a2, x1, x2):
     m = (a2 - a1) / (x2 - x1)
     b = a1 - m * x1
     return m, b
+
 
 def compute_itis(days_since_iv, dose, cfg):
     m_A, b_A = make_linear(cfg["A1"], cfg["A2"], cfg["dose1"], cfg["dose2"])
@@ -48,12 +51,14 @@ def compute_itis(days_since_iv, dose, cfg):
     itis = sigmoid_curve(days_since_iv, A, n, d)
     return float(np.clip(itis, 0.0, 1.0))
 
+
 def combine_itis(itis_values):
     """Cumulative score = 1 - Π(1-score)"""
     prod_term = 1.0
     for x in itis_values:
         prod_term *= (1.0 - x)
     return float(np.clip(1.0 - prod_term, 0.0, 1.0))
+
 
 def group_into_courses(entries, window_days):
     """
@@ -96,14 +101,18 @@ def group_into_courses(entries, window_days):
 def is_future_date(d):
     return d is not None and d > date.today()
 
+
 def is_after_encounter(d, encounter_date):
     return d is not None and d > encounter_date
+
 
 def clip_to_interval(value, low, high):
     return float(min(max(float(value), float(low)), float(high)))
 
+
 def clip_course_total(course_total, upper):
     return min(float(course_total), float(upper))
+
 
 def sanitize_age_at_encounter(age_years):
     if age_years is None:
@@ -115,6 +124,7 @@ def sanitize_age_at_encounter(age_years):
     if age_years < 0:
         return np.nan
     return age_years
+
 
 def use_integer_input(cfg):
     keys = ["daily_min", "daily_max", "default_dose", "default_step"]
@@ -141,6 +151,7 @@ def apply_relative_age_adjustment(dose, age_years):
     elif age_years > 82:
         return float(dose) * 2.5
     return float(dose)
+
 
 def apply_absolute_age_adjustment(dose, age_years):
     """
@@ -196,6 +207,7 @@ def should_apply_lymphocyte_adjustment(lymph_tested, lymph_test_date, encounter_
         return False
     return True
 
+
 def apply_relative_lymphocyte_adjustment(dose, lymph_value):
     """
     >1.2                -> no extra change
@@ -214,6 +226,7 @@ def apply_relative_lymphocyte_adjustment(dose, lymph_value):
         return float(dose) * 1.5
     else:
         return float(dose)
+
 
 def apply_absolute_lymphocyte_adjustment(dose, lymph_value):
     """
@@ -271,6 +284,9 @@ def apply_cd19_adjustment_for_rituximab(days_since_iv, iv_date, cd19_value, cd19
         return days_since_iv, False
 
     if iv_date is None or cd19_test_date is None:
+        return days_since_iv, False
+
+    if is_future_date(cd19_test_date):
         return days_since_iv, False
 
     interval_test_from_iv = (cd19_test_date - iv_date).days
@@ -607,6 +623,7 @@ def render_decay_oral_medication_section(
                 st.divider()
     else:
         st.caption("Not included (not received).")
+
 
 def render_prednisolone_section():
     st.subheader("Prednisolone")
@@ -1196,7 +1213,7 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
         st.write("No medications were entered.")
 
     if result["lymphocyte_tested"] == "Yes" and not result["lymphocyte_applied"]:
-        st.info("Lymphocyte-based dose adjustment was not applied because the lymphocyte count was invalid or missing, or the lymphocyte test date was after the encounter date.")
+        st.info("Lymphocyte-based dose adjustment was not applied because the lymphocyte count was invalid or missing, or the lymphocyte test date was in the future.")
 
     if result["any_errors"]:
         st.warning("One or more inputs were invalid. Some medications or courses may have been excluded.")
@@ -1273,17 +1290,18 @@ else:
         c1, c2 = st.columns(2)
         with c1:
             lymph_default_date = st.session_state.get("lymphocyte_test_date", encounter_date)
-if lymph_default_date is None or lymph_default_date > date.today():
-    lymph_default_date = date.today()
+            if lymph_default_date is None or lymph_default_date > date.today():
+                lymph_default_date = date.today()
 
-st.date_input(
-    "Date of test (DD/MM/YYYY)",
-    value=lymph_default_date,
-    min_value=date(1900, 1, 1),
-    max_value=date.today(),
-    format="DD/MM/YYYY",
-    key="lymphocyte_test_date",
-)
+            st.date_input(
+                "Date of test (DD/MM/YYYY)",
+                value=lymph_default_date,
+                min_value=date(1900, 1, 1),
+                max_value=date.today(),
+                format="DD/MM/YYYY",
+                key="lymphocyte_test_date",
+            )
+
         with c2:
             st.number_input(
                 "Lymphocyte count (×10⁹/L)",
@@ -1309,17 +1327,18 @@ st.date_input(
         c1, c2 = st.columns(2)
         with c1:
             cd19_default_date = st.session_state.get("cd19_test_date", encounter_date)
-            if cd19_default_date is None or cd19_default_date > encounter_date:
-                cd19_default_date = encounter_date
+            if cd19_default_date is None or cd19_default_date > date.today():
+                cd19_default_date = date.today()
 
             st.date_input(
                 "CD19 test date (DD/MM/YYYY)",
                 value=cd19_default_date,
                 min_value=date(1900, 1, 1),
-                max_value=encounter_date,
+                max_value=date.today(),
                 format="DD/MM/YYYY",
                 key="cd19_test_date",
             )
+
         with c2:
             st.number_input(
                 "CD19 value",
