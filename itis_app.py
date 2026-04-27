@@ -166,14 +166,37 @@ def apply_absolute_age_adjustment(dose, age_years):
 # Apply ONLY if lymphocyte tested == Yes and test date == encounter date
 # and only AFTER age-based adjustment
 # ============================================================
-def should_apply_lymphocyte_adjustment(lymph_tested, lymph_test_date, encounter_date, lymph_value):
+def has_valid_lymphocyte_result(lymph_tested, lymph_test_date, encounter_date, lymph_value):
+    """
+    Basic lymphocyte validity:
+    - lymphocyte tested == Yes
+    - test date present
+    - test date is not after encounter date
+    - lymphocyte value is valid
+
+    This is used for IV cyclophosphamide, where the lymphocyte date can be any
+    valid date on/before the encounter date, provided it falls within the
+    dose-specific IV cyclophosphamide vanish window from the IV dose date.
+    """
     if lymph_tested != "Yes":
         return False
     if lymph_test_date is None or encounter_date is None:
         return False
-    if lymph_test_date != encounter_date:
+    if lymph_test_date > encounter_date:
         return False
     if lymph_value is None or np.isnan(lymph_value):
+        return False
+    return True
+
+
+def should_apply_lymphocyte_adjustment(lymph_tested, lymph_test_date, encounter_date, lymph_value):
+    """
+    Standard lymphocyte adjustment rule for non-IV-cyclophosphamide medications:
+    lymphocyte test date must equal the encounter date.
+    """
+    if not has_valid_lymphocyte_result(lymph_tested, lymph_test_date, encounter_date, lymph_value):
+        return False
+    if lymph_test_date != encounter_date:
         return False
     return True
 
@@ -680,6 +703,13 @@ def calculate_all_results():
     except Exception:
         lymphocyte_count = np.nan
 
+    lymph_valid_any_date = has_valid_lymphocyte_result(
+        lymph_tested=lymph_tested,
+        lymph_test_date=lymph_test_date,
+        encounter_date=encounter_date,
+        lymph_value=lymphocyte_count,
+    )
+
     apply_lymph = should_apply_lymphocyte_adjustment(
         lymph_tested=lymph_tested,
         lymph_test_date=lymph_test_date,
@@ -732,17 +762,20 @@ def calculate_all_results():
             elif cfg.get("age_adjustment_type") == "absolute":
                 adjusted_dose = apply_absolute_age_adjustment(adjusted_dose, age_at_encounter)
 
-            if apply_lymph:
-                if med_name == "Cyclophosphamide (IV)":
-                    # For IV cyclophosphamide, apply lymphocyte adjustment only if the
-                    # encounter is within that dose's dose-specific vanish window.
-                    days_since_iv_for_lymph = (encounter_date - iv_date).days
+            if med_name == "Cyclophosphamide (IV)":
+                if lymph_valid_any_date:
+                    # For IV cyclophosphamide, the lymphocyte test can be any valid
+                    # date on/before the encounter date. Apply lymphocyte adjustment
+                    # only if that lymphocyte test date is within this dose's
+                    # dose-specific vanish window from the IV dose date.
+                    days_from_iv_to_lymph_test = (lymph_test_date - iv_date).days
                     cyc_vanish_day = calculate_cyc_iv_vanish_day(adjusted_dose)
 
-                    if 0 <= days_since_iv_for_lymph <= cyc_vanish_day:
+                    if 0 <= days_from_iv_to_lymph_test <= cyc_vanish_day:
                         adjusted_dose = apply_relative_lymphocyte_adjustment(adjusted_dose, lymphocyte_count)
 
-                elif cfg.get("lymphocyte_adjustment_type") == "relative":
+            elif apply_lymph:
+                if cfg.get("lymphocyte_adjustment_type") == "relative":
                     adjusted_dose = apply_relative_lymphocyte_adjustment(adjusted_dose, lymphocyte_count)
                 elif cfg.get("lymphocyte_adjustment_type") == "absolute":
                     adjusted_dose = apply_absolute_lymphocyte_adjustment(adjusted_dose, lymphocyte_count)
@@ -1076,7 +1109,7 @@ def calculate_all_results():
         "lymphocyte_tested": lymph_tested,
         "lymphocyte_test_date": lymph_test_date,
         "lymphocyte_count": lymphocyte_count,
-        "lymphocyte_applied": apply_lymph,
+        "lymphocyte_applied": apply_lymph or lymph_valid_any_date,
         "cd19_tested": cd19_tested,
         "cd19_test_date": cd19_test_date,
         "cd19_value": cd19_value,
@@ -1156,7 +1189,7 @@ elif st.session_state.show_result_page and st.session_state.result_payload is no
         st.write("No medications were entered.")
 
     if result["lymphocyte_tested"] == "Yes" and not result["lymphocyte_applied"]:
-        st.info("Lymphocyte-based dose adjustment was not applied because the lymphocyte test date did not match the encounter date, or the lymphocyte count was invalid or missing.")
+        st.info("Lymphocyte-based dose adjustment was not applied because the lymphocyte count was invalid or missing, or the lymphocyte test date was after the encounter date.")
 
     if result["any_errors"]:
         st.warning("One or more inputs were invalid. Some medications or courses may have been excluded.")
