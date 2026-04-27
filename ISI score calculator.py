@@ -1289,7 +1289,9 @@ else:
     if st.session_state["lymphocyte_tested"] == "Yes":
         c1, c2 = st.columns(2)
         with c1:
-            lymph_default_date = st.session_state.get("lymphocyte_test_date", encounter_date)
+            # Lymphocyte test date may be before OR after the encounter date.
+            # It is limited only by today's date to prevent future lab dates.
+            lymph_default_date = st.session_state.get("lymphocyte_test_date", date.today())
             if lymph_default_date is None or lymph_default_date > date.today():
                 lymph_default_date = date.today()
 
@@ -1326,7 +1328,9 @@ else:
     if st.session_state["cd19_tested"] == "Yes":
         c1, c2 = st.columns(2)
         with c1:
-            cd19_default_date = st.session_state.get("cd19_test_date", encounter_date)
+            # CD19 test date may be before OR after the encounter date.
+            # It is limited only by today's date to prevent future lab dates.
+            cd19_default_date = st.session_state.get("cd19_test_date", date.today())
             if cd19_default_date is None or cd19_default_date > date.today():
                 cd19_default_date = date.today()
 
